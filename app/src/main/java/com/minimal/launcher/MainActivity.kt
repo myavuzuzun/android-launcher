@@ -19,13 +19,17 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.UserHandle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.format.DateFormat
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -352,7 +356,10 @@ class MainActivity : Activity() {
             onSwipeDown = {
                 if (prefs.swipeDownNotifications) SystemHelper.expandNotifications(this)
             },
-            onLongPressEmpty = { openPreferences(fromDrawer = false) }
+            onLongPressEmpty = { openPreferences(fromDrawer = false) },
+            onDoubleTapEmpty = {
+                if (prefs.doubleTapLock) LockAccessibilityService.lockScreen(this)
+            }
         )
 
         // Soft bottom scrim so lowercase text stays legible over bright wallpapers
@@ -1079,6 +1086,16 @@ class MainActivity : Activity() {
                 renderPreferences()
             }
         )
+        prefsContent.addView(
+            toggleRow(
+                "double tap home → lock screen",
+                prefs.doubleTapLock,
+                theme
+            ) { checked ->
+                prefs.doubleTapLock = checked
+                renderPreferences()
+            }
+        )
 
         // Section: hidden apps
         prefsContent.addView(sectionLabel("hidden apps", theme))
@@ -1759,23 +1776,47 @@ class MainActivity : Activity() {
         context: Context,
         private val onSwipeUp: () -> Unit,
         private val onSwipeDown: () -> Unit,
-        private val onLongPressEmpty: () -> Unit
+        private val onLongPressEmpty: () -> Unit,
+        private val onDoubleTapEmpty: () -> Unit
     ) : FrameLayout(context) {
 
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
         private val swipeThreshold =
             TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 48f, context.resources.displayMetrics)
+        private val holdHandler = Handler(Looper.getMainLooper())
 
         private var startX = 0f
         private var startY = 0f
         private var intercepting = false
+        private var didMove = false
 
-        init {
-            isLongClickable = true
-            setOnLongClickListener {
+        private val longPressRunnable = Runnable {
+            if (isAttachedToWindow && !intercepting && !didMove) {
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 onLongPressEmpty()
-                true
             }
+        }
+
+        private val gestureDetector = GestureDetector(
+            context,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent): Boolean = true
+
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    holdHandler.removeCallbacks(longPressRunnable)
+                    if (!intercepting) {
+                        onDoubleTapEmpty()
+                    }
+                    return true
+                }
+            }
+        ).apply {
+            setIsLongpressEnabled(false)
+        }
+
+        override fun onDetachedFromWindow() {
+            super.onDetachedFromWindow()
+            holdHandler.removeCallbacks(longPressRunnable)
         }
 
         override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
@@ -1784,13 +1825,15 @@ class MainActivity : Activity() {
                     startX = ev.x
                     startY = ev.y
                     intercepting = false
+                    didMove = false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = abs(ev.x - startX)
                     val dy = abs(ev.y - startY)
                     if (dy > touchSlop && dy > dx * 1.15f) {
                         intercepting = true
-                        cancelLongPress()
+                        didMove = true
+                        holdHandler.removeCallbacks(longPressRunnable)
                         return true
                     }
                 }
@@ -1800,31 +1843,42 @@ class MainActivity : Activity() {
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                startX = event.x
+                startY = event.y
+                intercepting = false
+                didMove = false
+                holdHandler.removeCallbacks(longPressRunnable)
+                holdHandler.postDelayed(longPressRunnable, 5000L)
+            }
+            if (!intercepting) {
+                gestureDetector.onTouchEvent(event)
+            }
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    startX = event.x
-                    startY = event.y
-                    intercepting = false
-                    super.onTouchEvent(event)
-                    return true
-                }
+                MotionEvent.ACTION_DOWN -> return true
                 MotionEvent.ACTION_MOVE -> {
                     val dx = abs(event.x - startX)
                     val dy = abs(event.y - startY)
                     if (dx > touchSlop || dy > touchSlop) {
-                        cancelLongPress()
+                        didMove = true
+                        holdHandler.removeCallbacks(longPressRunnable)
                     }
-                    return if (intercepting) true else super.onTouchEvent(event)
+                    return true
                 }
                 MotionEvent.ACTION_UP -> {
+                    holdHandler.removeCallbacks(longPressRunnable)
                     val dy = event.y - startY
                     val dx = abs(event.x - startX)
                     if (abs(dy) > swipeThreshold && abs(dy) > dx) {
-                        cancelLongPress()
                         if (dy < 0) onSwipeUp() else onSwipeDown()
-                        return true
                     }
-                    return super.onTouchEvent(event)
+                    intercepting = false
+                    return true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    holdHandler.removeCallbacks(longPressRunnable)
+                    intercepting = false
+                    return true
                 }
             }
             return super.onTouchEvent(event)

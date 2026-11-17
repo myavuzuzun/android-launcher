@@ -36,6 +36,10 @@ class LauncherPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_SWIPE_DOWN_NOTIFICATIONS, true)
         set(value) = prefs.edit().putBoolean(KEY_SWIPE_DOWN_NOTIFICATIONS, value).apply()
 
+    var doubleTapLock: Boolean
+        get() = prefs.getBoolean(KEY_DOUBLE_TAP_LOCK, true)
+        set(value) = prefs.edit().putBoolean(KEY_DOUBLE_TAP_LOCK, value).apply()
+
     fun getPinnedKeys(): List<String> {
         val raw = prefs.getString(KEY_PINNED, "") ?: ""
         if (raw.isEmpty()) return emptyList()
@@ -155,6 +159,7 @@ class LauncherPrefs(context: Context) {
         private const val KEY_SWIPE_UP_ALL_APPS = "swipe_up_all_apps"
         private const val KEY_SWIPE_DOWN_HOME = "swipe_down_home"
         private const val KEY_SWIPE_DOWN_NOTIFICATIONS = "swipe_down_notifications"
+        private const val KEY_DOUBLE_TAP_LOCK = "double_tap_lock"
         private const val KEY_PINNED = "pinned_keys"
         private const val KEY_HIDDEN = "hidden_keys"
         private const val KEY_RENAME_PREFIX = "rename_"

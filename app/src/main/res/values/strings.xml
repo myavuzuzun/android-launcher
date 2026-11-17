@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">minimal launcher</string>
+    <string name="lock_service_desc">locks the screen when double-tapping the home screen</string>
 </resources>
